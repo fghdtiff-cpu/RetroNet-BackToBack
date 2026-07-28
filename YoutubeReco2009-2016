@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         YouTube Retro Recommendations (Redux & V3 Vorapis Edition)
+// @name         YouTube Retro Recommendations (Fix Autoplay Vorapis V3 - Version 12.0)
 // @namespace    http://tampermonkey.net/
-// @version      10.0
-// @description  Remplace toutes les vidéos par ~100 recommandations 2009-2015, compatible avec YouTube Redux & V3 Vorapis
+// @version      12.0
+// @description  Recommandations 2009-2015, fixe la recherche ET résout le bug de lecture/pause de Vorapis V3 & Redux.
 // @author       Assistant
 // @match        https://www.youtube.com/*
 // @grant        GM_xmlhttpRequest
@@ -15,10 +15,18 @@
     let lastUrl = location.href;
     let isFetching = false;
 
-    // 1. Déterminer le sujet de recherche (Compatible Vorapis / Redux)
+    // 1. Vérification de la page (Accueil ou Watch uniquement)
+    function isValidPage() {
+        const path = window.location.pathname;
+        const isWatch = path.startsWith('/watch');
+        const isHome = path === '/' || path === '' || path === '/index';
+        return { isWatch, isHome, valid: isWatch || isHome };
+    }
+
+    // 2. Déterminer le sujet de recherche
     function getCleanSearchQuery() {
-        if (window.location.pathname.startsWith('/watch')) {
-            // Sélection élargie des titres pour Vorapis V3 / Redux / YouTube Moderne
+        const { isWatch } = isValidPage();
+        if (isWatch) {
             const titleEl = document.querySelector('#eow-title, .watch-title, h1.watch-title-container, h1.title, ytd-watch-metadata #title h1');
             let rawTitle = titleEl ? titleEl.textContent : document.title;
 
@@ -29,7 +37,7 @@
                 .trim();
 
             const words = clean.split(/\s+/).filter(w => w.length > 2 && !['video', 'sharing', 'official', 'hd', '4k', 'youtube'].includes(w.toLowerCase()));
-
+            
             return words.slice(0, 3).join(' ') || "animation minecraft";
         } else {
             const homeTopics = [
@@ -42,7 +50,7 @@
         }
     }
 
-    // 2. Recherche HTTP interne sur YouTube
+    // 3. Recherche HTTP interne
     function fetchSingleSearch(fullQuery) {
         return new Promise((resolve) => {
             const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(fullQuery)}`;
@@ -90,7 +98,7 @@
         });
     }
 
-    // 3. Multi-requêtes simultanées (~100 vidéos)
+    // 4. Multi-requêtes (~100 vidéos)
     async function fetch100RetroVideos(baseQuery) {
         const queries = [
             `${baseQuery} after:2008 before:2010`,
@@ -117,9 +125,11 @@
         return uniqueVideos.slice(0, 100);
     }
 
-    // 4. Masquer toutes les vidéos originales avec priorité !important
+    // 5. Masquer les vidéos originales
     function hideOriginalVideos(container) {
-        if (!container) return;
+        const { valid } = isValidPage();
+        if (!container || !valid) return;
+
         Array.from(container.children).forEach(child => {
             if (!child.classList.contains('custom-api-recs-box')) {
                 child.style.setProperty('display', 'none', 'important');
@@ -127,17 +137,16 @@
         });
     }
 
-    // 5. Nettoyage
+    // 6. Nettoyage
     function clearAllExistingBoxes() {
         document.querySelectorAll('.custom-api-recs-box').forEach(el => el.remove());
     }
 
-    // 6. Détection étendue du conteneur (Vorapis V3 + Redux + standard)
+    // 7. Conteneur cible
     function getTargetContainer() {
-        const isWatchPage = window.location.pathname.startsWith('/watch');
+        const { isWatch, isHome } = isValidPage();
 
-        if (isWatchPage) {
-            // Sélecteurs pour Vorapis V3, Redux et YouTube Moderne
+        if (isWatch) {
             return document.querySelector([
                 '#watch7-sidebar-contents',
                 '#watch7-sidebar-modules',
@@ -148,8 +157,7 @@
                 '#secondary-inner',
                 'ytd-watch-next-secondary-results-renderer'
             ].join(', '));
-        } else {
-            // Sélecteurs d'accueil pour Vorapis V3, Redux et YouTube Moderne
+        } else if (isHome) {
             return document.querySelector([
                 '#feed-main-content',
                 '#feed-main-content-holder',
@@ -161,10 +169,45 @@
                 'ytd-rich-grid-renderer'
             ].join(', '));
         }
+        return null;
     }
 
-    // 7. Injection principale
+    // 8. Correctif pour débloquer la lecture automatique sur Vorapis V3 & Redux
+    function fixVorapisPlayerAutoplay() {
+        if (!window.location.pathname.startsWith('/watch')) return;
+
+        const attemptPlay = () => {
+            const video = document.querySelector('video');
+            const moviePlayer = document.getElementById('movie_player');
+
+            if (video && video.paused && video.currentTime < 1) {
+                // Relance forcée de la vidéo pour réaligner les états du bouton Play/Pause de Vorapis V3
+                if (moviePlayer && typeof moviePlayer.playVideo === 'function') {
+                    moviePlayer.playVideo();
+                } else {
+                    video.play().catch(() => {});
+                }
+            }
+        };
+
+        attemptPlay();
+        setTimeout(attemptPlay, 400);
+        setTimeout(attemptPlay, 1000);
+    }
+
+    // 9. Injection principale
     async function injectRecommendations() {
+        const { valid, isWatch } = isValidPage();
+
+        if (!valid) {
+            clearAllExistingBoxes();
+            return;
+        }
+
+        if (isWatch) {
+            fixVorapisPlayerAutoplay();
+        }
+
         const targetContainer = getTargetContainer();
         if (!targetContainer) return;
 
@@ -177,13 +220,10 @@
         clearAllExistingBoxes();
         const mainContainer = document.createElement('div');
         mainContainer.className = 'custom-api-recs-box';
-
-        const isWatchPage = window.location.pathname.startsWith('/watch');
-
-        // Styles isolés pour ne pas se faire écraser par Vorapis V3 / Redux CSS
+        
         mainContainer.style.cssText = 'background: #ffffff !important; border: 1px solid #e2e2e2 !important; padding: 12px !important; margin-bottom: 20px !important; font-family: Roboto, Arial, sans-serif !important; border-radius: 2px !important; width: 100% !important; box-sizing: border-box !important; display: block !important; clear: both !important;';
         mainContainer.innerHTML = `<div style="font-size: 11px; color: #666;">⏳ Recherche de ~100 vidéos rétro (2009-2015)...</div>`;
-
+        
         targetContainer.prepend(mainContainer);
 
         try {
@@ -196,9 +236,8 @@
             }
 
             let html = `<h3 style="margin: 0 0 10px 0 !important; font-size: 14px !important; color: #333 !important; font-weight: bold !important; border-bottom: 2px solid #cc0000 !important; padding-bottom: 5px !important; text-transform: none !important;">📻 Recommandations Rétro Exclusives (2009-2015) [${videos.length} vidéos]</h3>`;
-
-            if (isWatchPage) {
-                // Sidebar : Liste verticale avec barre de défilement
+            
+            if (isWatch) {
                 html += `<div style="display: flex !important; flex-direction: column !important; gap: 8px !important; max-height: calc(100vh - 120px) !important; overflow-y: auto !important; padding-right: 4px !important;">`;
                 videos.forEach(v => {
                     html += `
@@ -214,7 +253,6 @@
                 });
                 html += `</div>`;
             } else {
-                // Accueil : Grille de cartes rétro
                 html += `<div style="display: flex !important; flex-wrap: wrap !important; gap: 12px !important; max-height: calc(100vh - 150px) !important; overflow-y: auto !important; padding: 4px !important;">`;
                 videos.forEach(v => {
                     html += `
@@ -238,31 +276,44 @@
         }
     }
 
-    // 8. Surveillance dynamique des changements de DOM
+    // 10. Navigation et observateur
     function handleNavigation() {
         if (location.href !== lastUrl) {
             lastUrl = location.href;
             clearAllExistingBoxes();
-            setTimeout(injectRecommendations, 800);
+            const { valid } = isValidPage();
+            if (valid) {
+                setTimeout(injectRecommendations, 800);
+            }
         }
     }
 
     window.addEventListener('yt-navigate-finish', () => {
         clearAllExistingBoxes();
-        setTimeout(injectRecommendations, 800);
+        const { valid } = isValidPage();
+        if (valid) {
+            setTimeout(injectRecommendations, 800);
+        }
     });
 
     const observer = new MutationObserver(() => {
-        const container = getTargetContainer();
-        if (container) hideOriginalVideos(container);
-        handleNavigation();
-        injectRecommendations();
+        const { valid } = isValidPage();
+        if (valid) {
+            const container = getTargetContainer();
+            if (container) hideOriginalVideos(container);
+            handleNavigation();
+            injectRecommendations();
+        } else {
+            clearAllExistingBoxes();
+        }
     });
 
     if (document.body) {
         observer.observe(document.body, { childList: true, subtree: true });
     }
 
-    setTimeout(injectRecommendations, 1000);
-})();
+    const { valid } = isValidPage();
+    if (valid) {
+        setTimeout(injectRecommendations, 1000);
+    }
 })();
