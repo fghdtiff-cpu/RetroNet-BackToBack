@@ -1,0 +1,23 @@
+// ==UserScript==
+// @name         Clubic 2012 - Auto Wayback Redirect & Clean UI
+// @namespace    http://tampermonkey.net/
+// @version      1.0
+// @description  Redirige automatiquement vers la version 2012 de Clubic sur Wayback Machine et masque sa barre d'outils
+// @author       Gemini&Powered
+// @match        https://*.clubic.com/*
+// @exclude      https://web.archive.org/*
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // Date cible de l'archive (Juin 2012) et construction de l'URL Wayback Machine
+    const ARCHIVE_DATE = '20120601000000';
+    const currentUrl = window.location.href;
+
+    // Redirection automatique vers l'archive de la page actuelle
+    const archiveUrl = `https://web.archive.org/web/${ARCHIVE_DATE}id_/` + currentUrl;
+
+    window.location.replace(archiveUrl);
+})();
